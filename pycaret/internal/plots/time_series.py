@@ -105,6 +105,7 @@ def plot_(
                 predictions=predictions["y_pred"],
                 upper_interval=predictions["upper"],
                 lower_interval=predictions["lower"],
+                type_=plot,
                 model_name=model_name,
                 data_kwargs=data_kwargs,
                 fig_kwargs=fig_kwargs,
@@ -793,6 +794,7 @@ def plot_predictions_with_confidence(
     predictions: pd.Series,
     upper_interval: pd.Series,
     lower_interval: pd.Series,
+    type_: str,
     model_name: Optional[str] = None,
     data_kwargs: Optional[Dict] = None,
     fig_kwargs: Optional[Dict] = None,
@@ -805,7 +807,8 @@ def plot_predictions_with_confidence(
     if fig_kwargs is None:
         fig_kwargs = {}
 
-    title = "Actual vs. 'Out-of-Sample' Forecast"
+    key = "Out-of-Sample" if type_ == "forecast" else "In-Sample"
+    title = f"Actual vs. '{key}' Forecast"
     time_series_name = data.name
     if time_series_name is not None:
         title = f"{title} | {time_series_name}"

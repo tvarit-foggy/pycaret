@@ -2557,15 +2557,16 @@ class TimeSeriesExperiment(_SupervisedExperiment):
                 )
             elif plot in require_insample_predictions:
                 # Try to get insample forecasts if possible
+                return_pred_int = estimator.get_tag("capability:pred_int")
                 insample_predictions = self.get_insample_predictions(
-                    estimator=estimator
+                    estimator=estimator, return_pred_int=return_pred_int
                 )
                 if insample_predictions is None:
                     return
                 predictions = insample_predictions
                 data = self._get_y_data(split="all")
                 # Do not plot prediction interval for insample predictions
-                return_pred_int = False
+                # return_pred_int = False
 
             elif plot in require_residuals:
                 resid = self.get_residuals(estimator=estimator)
@@ -3586,7 +3587,9 @@ class TimeSeriesExperiment(_SupervisedExperiment):
 
         return resid
 
-    def get_insample_predictions(self, estimator) -> Optional[pd.Series]:
+    def get_insample_predictions(
+        self, estimator, return_pred_int: bool
+    ) -> Optional[pd.Series]:
         # https://github.com/alan-turing-institute/sktime/issues/1105#issuecomment-932216820
         insample_predictions = None
 
@@ -3595,7 +3598,9 @@ class TimeSeriesExperiment(_SupervisedExperiment):
         y_used_to_train = estimator_._y
         try:
             insample_predictions = self.predict_model(
-                estimator, fh=-np.arange(0, len(y_used_to_train))
+                estimator,
+                fh=-np.arange(0, len(y_used_to_train)),
+                return_pred_int=return_pred_int,
             )
         except NotImplementedError as exception:
             self.logger.warning(exception)
