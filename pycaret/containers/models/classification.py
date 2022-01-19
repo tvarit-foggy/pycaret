@@ -27,6 +27,7 @@ import pycaret.containers.base_container
 import numpy as np
 from packaging import version
 
+
 class ClassifierContainer(ModelContainer):
     """
     Base classification model container class, for easier definition of containers. Ensures consistent format
@@ -591,7 +592,18 @@ class GaussianProcessClassifierContainer(ClassifierContainer):
         }
         tune_args = {}
         tune_grid = {
-            "max_iter_predict": [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,]
+            "max_iter_predict": [
+                100,
+                200,
+                300,
+                400,
+                500,
+                600,
+                700,
+                800,
+                900,
+                1000,
+            ]
         }
         tune_distributions = {"max_iter_predict": IntUniformDistribution(100, 1000)}
 
@@ -756,15 +768,14 @@ class RandomForestClassifierContainer(ClassifierContainer):
             }
         else:
             import cuml
+
             if version.parse(cuml.__version__) >= version.parse("0.19"):
                 args = {
-                "random_state": globals_dict["seed"],
+                    "random_state": globals_dict["seed"],
                 }
             else:
-                args = {
-                    "seed": globals_dict["seed"]
-                }
-        
+                args = {"seed": globals_dict["seed"]}
+
         tune_args = {}
         tune_grid = {
             "n_estimators": np_list_arange(10, 300, 10, inclusive=True),
@@ -1340,11 +1351,11 @@ class LGBMClassifierContainer(ClassifierContainer):
                             f"LightGBM GPU mode not available. Consult https://lightgbm.readthedocs.io/en/latest/GPU-Tutorial.html."
                         )
 
-        if is_gpu_enabled=="gpu":
+        if is_gpu_enabled == "gpu":
             args["device"] = "gpu"
-        elif is_gpu_enabled=="cuda":
+        elif is_gpu_enabled == "cuda":
             args["device"] = "cuda"
-        
+
         super().__init__(
             id="lightgbm",
             name="Light Gradient Boosting Machine",
@@ -1441,13 +1452,14 @@ class CatBoostClassifierContainer(ClassifierContainer):
             is_gpu_enabled=use_gpu,
         )
 
+
 class DummyClassifierContainer(ClassifierContainer):
     def __init__(self, globals_dict: dict) -> None:
         logger = get_logger()
         np.random.seed(globals_dict["seed"])
         from sklearn.dummy import DummyClassifier
 
-        args = {"strategy":"prior","random_state": globals_dict["seed"]}
+        args = {"strategy": "prior", "random_state": globals_dict["seed"]}
         tune_args = {}
         tune_grid = {}
         tune_distributions = {}
@@ -1464,7 +1476,8 @@ class DummyClassifierContainer(ClassifierContainer):
             tune_args=tune_args,
             shap=False,
         )
-        
+
+
 class BaggingClassifierContainer(ClassifierContainer):
     def __init__(self, globals_dict: dict) -> None:
         logger = get_logger()
@@ -1587,6 +1600,7 @@ class CalibratedClassifierCVContainer(ClassifierContainer):
             is_special=True,
             is_gpu_enabled=False,
         )
+
 
 def get_all_model_containers(
     globals_dict: dict, raise_errors: bool = True

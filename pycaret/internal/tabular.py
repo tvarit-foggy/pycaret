@@ -37,10 +37,6 @@ from pycaret.internal.Display import Display, is_in_colab
 from pycaret.internal.distributions import *
 from pycaret.internal.validation import *
 from pycaret.internal.tunable import TunableMixin
-from pycaret.internal.drift_report import (
-    create_classification_drift_report,
-    create_regression_drift_report,
-)
 import pycaret.containers.metrics.classification
 import pycaret.containers.metrics.regression
 import pycaret.containers.metrics.clustering
@@ -1835,6 +1831,7 @@ def compare_models(
     probability_threshold: Optional[float] = None,
     verbose: bool = True,
     display: Optional[Display] = None,
+    return_train_score=False,
 ) -> List[Any]:
 
     """
@@ -2011,10 +2008,12 @@ def compare_models(
     if budget_time and type(budget_time) is not int and type(budget_time) is not float:
         raise TypeError("budget_time parameter only accepts integer or float values.")
 
+    sort_ = sort.split("_")[1]
+
     # checking sort parameter
-    if not (isinstance(sort, str) and (sort == "TT" or sort == "TT (Sec)")):
-        sort = _get_metric(sort)
-        if sort is None:
+    if not (isinstance(sort_, str) and (sort == "TT" or sort == "TT (Sec)")):
+        sort_ = _get_metric(sort_)
+        if sort_ is None:
             raise ValueError(
                 f"Sort method not supported. See docstring for list of available parameters."
             )
@@ -2060,9 +2059,22 @@ def compare_models(
 
     if not display:
         progress_args = {"max": (4 * len_mod) + 4 + len_mod}
-        master_display_columns = (
-            ["Model"] + [v.display_name for k, v in _all_metrics.items()] + ["TT (Sec)"]
-        )
+        if return_train_score:
+            master_display_columns = ["Model"] + [
+                "Train_" + v.display_name for k, v in _all_metrics.items()
+            ]
+            master_display_columns.extend(
+                (
+                    ["Test_" + v.display_name for k, v in _all_metrics.items()]
+                    + ["TT (Sec)"]
+                )
+            )
+        else:
+            master_display_columns = (
+                ["Model"]
+                + ["Test_" + v.display_name for k, v in _all_metrics.items()]
+                + ["TT (Sec)"]
+            )
         timestampStr = datetime.datetime.now().strftime("%H:%M:%S")
         monitor_rows = [
             ["Initiated", ". . . . . . . . . . . . . . . . . .", timestampStr],
@@ -2093,11 +2105,11 @@ def compare_models(
     # defining sort parameter (making Precision equivalent to Prec. )
 
     if not (isinstance(sort, str) and (sort == "TT" or sort == "TT (Sec)")):
-        sort_ascending = not sort.greater_is_better
-        sort = sort.display_name
+        sort_ascending = not sort_.greater_is_better
+        sort_ = sort_.display_name
     else:
         sort_ascending = True
-        sort = "TT (Sec)"
+        sort_ = "TT (Sec)"
 
     """
     MONITOR UPDATE STARTS
@@ -2197,6 +2209,7 @@ def compare_models(
             groups=groups,
             probability_threshold=probability_threshold,
             refit=False,
+            return_train_score=return_train_score,
         )
         if errors == "raise":
             model, model_fit_time = create_model_supervised(**create_model_args)
@@ -2794,6 +2807,7 @@ def create_model_supervised(
     add_to_model_list: bool = True,
     probability_threshold: Optional[float] = None,
     display: Optional[Display] = None,  # added in pycaret==2.2.0
+    return_train_score=False,
     **kwargs,
 ) -> Any:
 
@@ -2886,6 +2900,10 @@ def create_model_supervised(
         If not None, will use this dataframe as training target.
         Intended to be only changed by internal functions.
 
+    return_train_score: bool, default = False
+        If not False, will evaluate the train value scores.
+        Intended to be fed as an input from the user.
+
     **kwargs:
         Additional keyword arguments to pass to the estimator.
 
@@ -2974,6 +2992,10 @@ def create_model_supervised(
             "cross_validation parameter can only take argument as True or False."
         )
 
+    # checking return_train_score parameter
+    if type(return_train_score) is not bool:
+        raise TypeError("return_train_score can only take argument as True or False")
+
     """
 
     ERROR HANDLING ENDS HERE
@@ -2984,7 +3006,17 @@ def create_model_supervised(
 
     if not display:
         progress_args = {"max": 4}
-        master_display_columns = [v.display_name for k, v in _all_metrics.items()]
+        if return_train_score:
+            master_display_columns = [
+                "Train_" + v.display_name for k, v in _all_metrics.items()
+            ]
+            master_display_columns.extend(
+                "Test_" + v.display_name for k, v in _all_metrics.items()
+            )
+        else:
+            master_display_columns = [
+                "Test_" + v.display_name for k, v in _all_metrics.items()
+            ]
         timestampStr = datetime.datetime.now().strftime("%H:%M:%S")
         monitor_rows = [
             ["Initiated", ". . . . . . . . . . . . . . . . . .", timestampStr],
@@ -3177,33 +3209,65 @@ def create_model_supervised(
             scoring=metrics_dict,
             fit_params=fit_kwargs,
             n_jobs=n_jobs,
-            return_train_score=False,
+            return_train_score=return_train_score,
             error_score=0,
         )
         model_fit_end = time.time()
         model_fit_time = np.array(model_fit_end - model_fit_start).round(2)
 
-        score_dict = {
-            v.display_name: scores[f"test_{k}"] * (1 if v.greater_is_better else -1)
+        if return_train_score:
+            train_score_dict = {
+                f"Train_{v.name}": scores[f"train_{k}"]
+                * (1 if v.greater_is_better else -1)
+                for k, v in metrics.items()
+            }
+
+        test_score_dict = {
+            f"Test_{v.name}": scores[f"test_{k}"] * (1 if v.greater_is_better else -1)
             for k, v in metrics.items()
         }
 
         logger.info("Calculating mean and std")
 
-        avgs_dict = {k: [np.mean(v), np.std(v)] for k, v in score_dict.items()}
+        if return_train_score:
+            train_avgs_dict = {
+                k: [np.mean(v), np.std(v)] for k, v in train_score_dict.items()
+            }
+
+        test_avgs_dict = {
+            k: [np.mean(v), np.std(v)] for k, v in test_score_dict.items()
+        }
+
+        avgs_dict = test_avgs_dict.copy()
+        if return_train_score:
+            avgs_dict.update(train_avgs_dict)
 
         display.move_progress()
 
         logger.info("Creating metrics dataframe")
 
-        model_results = pd.DataFrame(score_dict)
-        model_avgs = pd.DataFrame(
-            avgs_dict,
+        if return_train_score:
+            train_results = pd.DataFrame(train_score_dict)
+            train_avgs = pd.DataFrame(train_avgs_dict, index=["Mean", "SD"])
+
+            train_results = train_results.append(train_avgs)
+            train_results = train_results.round(round)
+
+        test_results = pd.DataFrame(test_score_dict)
+        test_avgs = pd.DataFrame(
+            test_avgs_dict,
             index=["Mean", "SD"],
         )
 
-        model_results = model_results.append(model_avgs)
-        model_results = model_results.round(round)
+        test_results = test_results.append(test_avgs)
+        test_results = test_results.round(round)
+
+        if return_train_score:
+            model_results = pd.merge(
+                train_results, test_results, left_index=True, right_index=True
+            )
+        else:
+            model_results = test_results
 
         # yellow the mean
         model_results = color_df(model_results, "yellow", ["Mean"], axis=1)
@@ -3663,6 +3727,7 @@ def tune_model_supervised(
     verbose: bool = True,
     tuner_verbose: Union[int, bool] = True,
     display: Optional[Display] = None,
+    return_train_score=False,
     **kwargs,
 ) -> Any:
 
@@ -3803,6 +3868,10 @@ def tune_model_supervised(
     tuner_verbose: bool or in, default = True
         If True or above 0, will print messages from the tuner. Higher values
         print more messages. Ignored if verbose param is False.
+
+    return_train_score: bool, default = False
+        If not False, will evaluate the train value scores.
+        Intended to be fed as an input from the user.
 
     **kwargs:
         Additional keyword arguments to pass to the optimizer.
@@ -4055,6 +4124,10 @@ def tune_model_supervised(
     elif tuner_verbose > 2:
         tuner_verbose = 2
 
+    # checking return_train_score parameter
+    if type(return_train_score) is not bool:
+        raise TypeError("return_train_score can only take argument as True or False")
+
     """
 
     ERROR HANDLING ENDS HERE
@@ -4067,7 +4140,17 @@ def tune_model_supervised(
 
     if not display:
         progress_args = {"max": 3 + 4}
-        master_display_columns = [v.display_name for k, v in _all_metrics.items()]
+        if return_train_score:
+            master_display_columns = [
+                "Train_" + v.display_name for k, v in _all_metrics.items()
+            ]
+            master_display_columns.extend(
+                "Test_" + v.display_name for k, v in _all_metrics.items()
+            )
+        else:
+            master_display_columns = [
+                "Test_" + v.display_name for k, v in _all_metrics.items()
+            ]
         timestampStr = datetime.datetime.now().strftime("%H:%M:%S")
         monitor_rows = [
             ["Initiated", ". . . . . . . . . . . . . . . . . .", timestampStr],
@@ -4597,6 +4680,7 @@ def tune_model_supervised(
         round=round,
         groups=groups,
         fit_kwargs=fit_kwargs,
+        return_train_score=return_train_score,
         **best_params,
     )
     model_results = pull()
@@ -5724,7 +5808,6 @@ def plot_model(
     save: Union[str, bool] = False,
     fold: Optional[Union[int, Any]] = None,
     fit_kwargs: Optional[dict] = None,
-    plot_kwargs: Optional[dict] = None,
     groups: Optional[Union[str, Any]] = None,
     feature_name: Optional[str] = None,
     label: bool = False,
@@ -5798,9 +5881,6 @@ def plot_model(
     fit_kwargs: dict, default = {} (empty dict)
         Dictionary of arguments passed to the fit method of the model.
 
-    plot_kwargs: dict, default = {} (empty dict)
-        Dictionary of arguments passed to the visualizer class.
-
     groups: str or array-like, with shape (n_samples,), default = None
         Optional Group labels for the samples used while splitting the dataset into train/test set.
         If string is passed, will use the data column with that name as the groups.
@@ -5850,9 +5930,6 @@ def plot_model(
 
     if not fit_kwargs:
         fit_kwargs = {}
-
-    if not plot_kwargs:
-        plot_kwargs = {}
 
     if not hasattr(estimator, "fit"):
         raise ValueError(
@@ -6348,7 +6425,7 @@ def plot_model(
             if feature_name is not None:
                 X_embedded["Feature"] = data_before_preprocess[feature_name]
             else:
-                X_embedded["Feature"] = data_before_preprocess.iloc[:, 0]
+                X_embedded["Feature"] = data_before_preprocess[data_X.columns[0]]
 
             if label:
                 X_embedded["Label"] = X_embedded["Feature"]
@@ -6496,9 +6573,7 @@ def plot_model(
             try:
                 from yellowbrick.cluster import KElbowVisualizer
 
-                visualizer = KElbowVisualizer(
-                    pipeline_with_model, timings=False, **plot_kwargs
-                )
+                visualizer = KElbowVisualizer(pipeline_with_model, timings=False)
                 show_yellowbrick_plot(
                     visualizer=visualizer,
                     X_train=data_X,
@@ -6525,7 +6600,7 @@ def plot_model(
 
             try:
                 visualizer = SilhouetteVisualizer(
-                    pipeline_with_model, colors="yellowbrick", **plot_kwargs
+                    pipeline_with_model, colors="yellowbrick"
                 )
                 show_yellowbrick_plot(
                     visualizer=visualizer,
@@ -6551,7 +6626,7 @@ def plot_model(
             from yellowbrick.cluster import InterclusterDistance
 
             try:
-                visualizer = InterclusterDistance(pipeline_with_model, **plot_kwargs)
+                visualizer = InterclusterDistance(pipeline_with_model)
                 show_yellowbrick_plot(
                     visualizer=visualizer,
                     X_train=data_X,
@@ -6576,7 +6651,7 @@ def plot_model(
 
             from yellowbrick.regressor import ResidualsPlot
 
-            visualizer = ResidualsPlot(pipeline_with_model, **plot_kwargs)
+            visualizer = ResidualsPlot(pipeline_with_model)
             show_yellowbrick_plot(
                 visualizer=visualizer,
                 X_train=data_X,
@@ -6596,18 +6671,7 @@ def plot_model(
 
             from yellowbrick.classifier import ROCAUC
 
-            try:
-                dtype_object = get_config("prep_pipe").steps[0][1]
-                encoder_labels = dtype_object.le.transform(dtype_object.le.classes_)
-                encoder_classes = dtype_object.le.classes_
-                encoder_dictionary = dict(zip(encoder_labels, encoder_classes))
-            except:
-                encoder_dictionary = None
-
-            visualizer = ROCAUC(
-                pipeline_with_model, encoder=encoder_dictionary, **plot_kwargs
-            )
-
+            visualizer = ROCAUC(pipeline_with_model)
             show_yellowbrick_plot(
                 visualizer=visualizer,
                 X_train=data_X,
@@ -6627,9 +6691,7 @@ def plot_model(
 
             from yellowbrick.classifier import DiscriminationThreshold
 
-            visualizer = DiscriminationThreshold(
-                pipeline_with_model, random_state=seed, **plot_kwargs
-            )
+            visualizer = DiscriminationThreshold(pipeline_with_model, random_state=seed)
             show_yellowbrick_plot(
                 visualizer=visualizer,
                 X_train=data_X,
@@ -6649,9 +6711,7 @@ def plot_model(
 
             from yellowbrick.classifier import PrecisionRecallCurve
 
-            visualizer = PrecisionRecallCurve(
-                pipeline_with_model, random_state=seed, **plot_kwargs
-            )
+            visualizer = PrecisionRecallCurve(pipeline_with_model, random_state=seed)
             show_yellowbrick_plot(
                 visualizer=visualizer,
                 X_train=data_X,
@@ -6671,32 +6731,11 @@ def plot_model(
 
             from yellowbrick.classifier import ConfusionMatrix
 
-            try:
-                dtype_object = get_config("prep_pipe").steps[0][1]
-                encoder_labels = dtype_object.le.transform(dtype_object.le.classes_)
-                encoder_classes = dtype_object.le.classes_
-                encoder_dictionary = dict(zip(encoder_labels, encoder_classes))
-            except:
-                encoder_dictionary = None
-
-            # temp patching for rendering purposes
-            try:
-                cmap_user_defined = plot_kwargs["cmap"]
-            except:
-                plot_kwargs["cmap"] = "Greens"
-
-            try:
-                fontsize_user_defined = plot_kwargs["fontsize"]
-            except:
-                plot_kwargs["fontsize"] = 15
-
             visualizer = ConfusionMatrix(
                 pipeline_with_model,
                 random_state=seed,
-                # fontsize=fontsize_user_defined,
-                # cmap=cmap_user_defined,
-                encoder=encoder_dictionary,
-                **plot_kwargs,
+                fontsize=15,
+                cmap="Greens",
             )
             show_yellowbrick_plot(
                 visualizer=visualizer,
@@ -6718,27 +6757,14 @@ def plot_model(
             if _ml_usecase == MLUsecase.CLASSIFICATION:
                 from yellowbrick.classifier import ClassPredictionError
 
-                try:
-                    dtype_object = get_config("prep_pipe").steps[0][1]
-                    encoder_labels = dtype_object.le.transform(dtype_object.le.classes_)
-                    encoder_classes = dtype_object.le.classes_
-                    encoder_dictionary = dict(zip(encoder_labels, encoder_classes))
-                except:
-                    encoder_dictionary = None
-
                 visualizer = ClassPredictionError(
-                    pipeline_with_model,
-                    random_state=seed,
-                    encoder=encoder_dictionary,
-                    **plot_kwargs,
+                    pipeline_with_model, random_state=seed
                 )
 
             elif _ml_usecase == MLUsecase.REGRESSION:
                 from yellowbrick.regressor import PredictionError
 
-                visualizer = PredictionError(
-                    pipeline_with_model, random_state=seed, **plot_kwargs
-                )
+                visualizer = PredictionError(pipeline_with_model, random_state=seed)
 
             show_yellowbrick_plot(
                 visualizer=visualizer,
@@ -6780,22 +6806,9 @@ def plot_model(
 
             from yellowbrick.classifier import ClassificationReport
 
-            try:
-                dtype_object = get_config("prep_pipe").steps[0][1]
-                encoder_labels = dtype_object.le.transform(dtype_object.le.classes_)
-                encoder_classes = dtype_object.le.classes_
-                encoder_dictionary = dict(zip(encoder_labels, encoder_classes))
-            except:
-                encoder_dictionary = None
-
             visualizer = ClassificationReport(
-                pipeline_with_model,
-                random_state=seed,
-                support=True,
-                encoder=encoder_dictionary,
-                **plot_kwargs,
+                pipeline_with_model, random_state=seed, support=True
             )
-
             show_yellowbrick_plot(
                 visualizer=visualizer,
                 X_train=data_X,
@@ -6830,17 +6843,7 @@ def plot_model(
             data_y_transformed = np.array(data_y)
             test_y_transformed = np.array(test_y)
 
-            try:
-                dtype_object = get_config("prep_pipe").steps[0][1]
-                encoder_labels = dtype_object.le.transform(dtype_object.le.classes_)
-                encoder_classes = dtype_object.le.classes_
-                encoder_dictionary = dict(zip(encoder_labels, encoder_classes))
-            except:
-                encoder_dictionary = None
-
-            viz_ = DecisionViz(
-                pipeline_with_model, encoder=encoder_dictionary, **plot_kwargs
-            )
+            viz_ = DecisionViz(pipeline_with_model)
             show_yellowbrick_plot(
                 visualizer=viz_,
                 X_train=data_X_transformed,
@@ -6863,7 +6866,7 @@ def plot_model(
 
             from yellowbrick.model_selection import RFECV
 
-            visualizer = RFECV(pipeline_with_model, cv=cv, **plot_kwargs)
+            visualizer = RFECV(pipeline_with_model, cv=cv)
             show_yellowbrick_plot(
                 visualizer=visualizer,
                 X_train=data_X,
@@ -6891,7 +6894,6 @@ def plot_model(
                 train_sizes=sizes,
                 n_jobs=_gpu_n_jobs_param,
                 random_state=seed,
-                **plot_kwargs,
             )
             show_yellowbrick_plot(
                 visualizer=visualizer,
@@ -6933,10 +6935,7 @@ def plot_model(
                     logger.info(f"Saving '{plot_filename}.png'")
                     plt.savefig(f"{plot_filename}.png", bbox_inches="tight")
                 elif system:
-                    if display_format == "streamlit":
-                        st.pyplot(plt, clear_figure=True)
-                    else:
-                        plt.show()
+                    plt.show()
                 plt.close()
 
             logger.info("Visual Rendered Successfully")
@@ -6965,10 +6964,7 @@ def plot_model(
                     logger.info(f"Saving '{plot_filename}.png'")
                     plt.savefig(f"{plot_filename}.png", bbox_inches="tight")
                 elif system:
-                    if display_format == "streamlit":
-                        st.pyplot(plt, clear_figure=True)
-                    else:
-                        plt.show()
+                    plt.show()
                 plt.close()
 
             logger.info("Visual Rendered Successfully")
@@ -6978,8 +6974,7 @@ def plot_model(
             from yellowbrick.features import Manifold
 
             data_X_transformed = data_X.select_dtypes(include="float32")
-            visualizer = Manifold(manifold="tsne", random_state=seed, **plot_kwargs)
-
+            visualizer = Manifold(manifold="tsne", random_state=seed)
             show_yellowbrick_plot(
                 visualizer=visualizer,
                 X_train=data_X_transformed,
@@ -7050,12 +7045,11 @@ def plot_model(
             ) as fitted_pipeline_with_model:
                 trees = []
                 feature_names = list(data_X.columns)
-                if _ml_usecase == MLUsecase.CLASSIFICATION and hasattr(
-                    prep_pipe.named_steps["dtypes"], "replacement"
-                ):
-                    class_names = list(
-                        prep_pipe.named_steps["dtypes"].replacement.keys()
-                    )
+                if _ml_usecase == MLUsecase.CLASSIFICATION:
+                    class_names = {
+                        v: k
+                        for k, v in prep_pipe.named_steps["dtypes"].replacement.items()
+                    }
                 else:
                     class_names = None
                 fitted_tree_estimator = fitted_pipeline_with_model.steps[-1][1]
@@ -7089,6 +7083,8 @@ def plot_model(
                         trees = fitted_tree_estimator.estimators_
                     except:
                         trees = [fitted_tree_estimator]
+                if _ml_usecase == MLUsecase.CLASSIFICATION:
+                    class_names = list(class_names.values())
                 for i, tree in enumerate(trees):
                     logger.info(f"Plotting tree {i}")
                     plot_tree(
@@ -7115,10 +7111,7 @@ def plot_model(
                 logger.info(f"Saving '{plot_filename}.png'")
                 plt.savefig(f"{plot_filename}.png", bbox_inches="tight")
             elif system:
-                if display_format == "streamlit":
-                    st.pyplot(plt, clear_figure=True)
-                else:
-                    plt.show()
+                plt.show()
             plt.close()
 
             logger.info("Visual Rendered Successfully")
@@ -7327,7 +7320,6 @@ def plot_model(
                 cv=cv,
                 random_state=seed,
                 n_jobs=_gpu_n_jobs_param,
-                **plot_kwargs,
             )
             show_yellowbrick_plot(
                 visualizer=viz,
@@ -7365,7 +7357,7 @@ def plot_model(
             data_X_transformed = pca.fit_transform(data_X_transformed)
             display.move_progress()
             classes = data_y.unique().tolist()
-            visualizer = RadViz(classes=classes, alpha=0.25, **plot_kwargs)
+            visualizer = RadViz(classes=classes, alpha=0.25)
 
             show_yellowbrick_plot(
                 visualizer=visualizer,
@@ -7432,10 +7424,7 @@ def plot_model(
                 logger.info(f"Saving '{plot_filename}.png'")
                 plt.savefig(f"{plot_filename}.png", bbox_inches="tight")
             elif system:
-                if display_format == "streamlit":
-                    st.pyplot(plt, clear_figure=True)
-                else:
-                    plt.show()
+                plt.show()
             plt.close()
 
             logger.info("Visual Rendered Successfully")
@@ -7478,10 +7467,7 @@ def plot_model(
                     logger.info(f"Saving '{plot_filename}.png'")
                     plt.savefig(f"{plot_filename}.png", bbox_inches="tight")
                 elif system:
-                    if display_format == "streamlit":
-                        st.pyplot(plt, clear_figure=True)
-                    else:
-                        plt.show()
+                    plt.show()
                 plt.close()
 
             logger.info("Visual Rendered Successfully")
@@ -7510,7 +7496,6 @@ def evaluate_model(
     estimator,
     fold: Optional[Union[int, Any]] = None,
     fit_kwargs: Optional[dict] = None,
-    plot_kwargs: Optional[dict] = None,
     feature_name: Optional[str] = None,
     groups: Optional[Union[str, Any]] = None,
     use_train_data: bool = False,
@@ -7570,9 +7555,6 @@ def evaluate_model(
     if not fit_kwargs:
         fit_kwargs = {}
 
-    if not plot_kwargs:
-        plot_kwargs = {}
-
     a = widgets.ToggleButtons(
         options=[(v, k) for k, v in _available_plots.items()],
         description="Plot Type:",
@@ -7594,7 +7576,6 @@ def evaluate_model(
         scale=fixed(1),
         fold=fixed(fold),
         fit_kwargs=fixed(fit_kwargs),
-        plot_kwargs=fixed(plot_kwargs),
         feature_name=fixed(feature_name),
         label=fixed(False),
         groups=fixed(groups),
@@ -8302,19 +8283,19 @@ def calibrate_model(
 
 def optimize_threshold(
     estimator,
-    optimize: str = "Accuracy",
-    grid_interval: float = 0.1,
-    return_data: bool = False, 
-    plot_kwargs: Optional[dict] = None,
+    true_positive: int = 0,
+    true_negative: int = 0,
+    false_positive: int = 0,
+    false_negative: int = 0,
 ):
 
     """
-    This function optimizes probability threshold for a trained classifier. It 
-    iterates over performance metrics at different ``probability_threshold`` with
-    a step size defined in ``grid_interval`` parameter. This function will display
-    a plot of the performance metrics at each probability threshold and returns the
-    best model based on the metric defined under ``optimize`` parameter.
+    This function optimizes probability threshold for a trained model using custom cost
+    function that can be defined using combination of True Positives, True Negatives,
+    False Positives (also known as Type I error), and False Negatives (Type II error).
 
+    This function returns a plot of optimized cost as a function of probability
+    threshold between 0 to 100.
 
     Example
     -------
@@ -8322,39 +8303,38 @@ def optimize_threshold(
     >>> juice = get_data('juice')
     >>> experiment_name = setup(data = juice,  target = 'Purchase')
     >>> lr = create_model('lr')
-    >>> best_lr_threshold = optimize_threshold(lr)
+    >>> optimize_threshold(lr, true_negative = 10, false_negative = -100)
 
+    This will return a plot of optimized cost as a function of probability threshold.
 
     Parameters
     ----------
     estimator : object
         A trained model object should be passed as an estimator.
 
+    true_positive : int, default = 0
+        Cost function or returns when prediction is true positive.
 
-    optimize : str, default = 'Accuracy'
-        Metric to be used for selecting best model. 
+    true_negative : int, default = 0
+        Cost function or returns when prediction is true negative.
 
+    false_positive : int, default = 0
+        Cost function or returns when prediction is false positive.
 
-    grid_interval : float, default = 0.0001
-        Grid interval for threshold grid search. Default 10 iterations.
-
-
-    return_data :  bool, default = False
-        When set to True, data used for visualization is also returned.
-
-
-    plot_kwargs :  dict, default = {} (empty dict)
-        Dictionary of arguments passed to the visualizer class.
+    false_negative : int, default = 0
+        Cost function or returns when prediction is false negative.
 
 
     Returns
     -------
-    Trained Model
-
+    Visual_Plot
+        Prints the visual plot.
 
     Warnings
     --------
-    - This function does not support multiclass classification problems.
+    - This function is not supported for multiclass problems.
+
+
     """
 
     function_params_str = ", ".join([f"{k}={v}" for k, v in locals().items()])
@@ -8389,73 +8369,136 @@ def optimize_threshold(
                 "Estimator doesn't support predict_proba function and cannot be used in optimize_threshold()."
             )
 
+    # check cost function type
     allowed_types = [int, float]
 
-    if type(grid_interval) not in allowed_types or grid_interval > 1.0:
-        raise TypeError("grid_interval should be float and less than 1.0.")
+    if type(true_positive) not in allowed_types:
+        raise TypeError("true_positive parameter only accepts float or integer value.")
 
-    if isinstance(optimize, str):
-        # checking optimize parameter
-        optimize = _get_metric(optimize)
-        if optimize is None:
-            raise ValueError(
-                "Optimize method not supported. See docstring for list of available parameters."
-            )
-        optimize = optimize.display_name
+    if type(true_negative) not in allowed_types:
+        raise TypeError("true_negative parameter only accepts float or integer value.")
+
+    if type(false_positive) not in allowed_types:
+        raise TypeError("false_positive parameter only accepts float or integer value.")
+
+    if type(false_negative) not in allowed_types:
+        raise TypeError("false_negative parameter only accepts float or integer value.")
 
     """
     ERROR HANDLING ENDS HERE
     """
 
-    logger.info("defining variables")
-    # get estimator name
-    model_name = _get_model_name(estimator)
+    # define model as estimator
+    model = get_estimator_from_meta_estimator(estimator)
 
-    # defines grid
-    grid = np.arange(0, 1.0001, grid_interval)
+    model_name = _get_model_name(model)
 
-    # defines empty list
-    models_by_threshold = []
-    results_df = []
+    # generate predictions and store actual on y_test in numpy array
+    actual = np.array(y_test)
 
-    logger.info("starting optimization loop")
+    predicted = model.predict_proba(X_test)
+    predicted = predicted[:, 1]
+
+    """
+    internal function to calculate loss starts here
+    """
+
+    logger.info("Defining loss function")
+
+    def calculate_loss(
+        actual,
+        predicted,
+        tp_cost=true_positive,
+        tn_cost=true_negative,
+        fp_cost=false_positive,
+        fn_cost=false_negative,
+    ):
+
+        # true positives
+        tp = predicted + actual
+        tp = np.where(tp == 2, 1, 0)
+        tp = tp.sum()
+
+        # true negative
+        tn = predicted + actual
+        tn = np.where(tn == 0, 1, 0)
+        tn = tn.sum()
+
+        # false positive
+        fp = (predicted > actual).astype(int)
+        fp = np.where(fp == 1, 1, 0)
+        fp = fp.sum()
+
+        # false negative
+        fn = (predicted < actual).astype(int)
+        fn = np.where(fn == 1, 1, 0)
+        fn = fn.sum()
+
+        total_cost = (tp_cost * tp) + (tn_cost * tn) + (fp_cost * fp) + (fn_cost * fn)
+
+        return total_cost
+
+    """
+    internal function to calculate loss ends here
+    """
+
+    grid = np.arange(0, 1, 0.0001)
+
     # loop starts here
+
+    cost = []
+    # global optimize_results
+
+    logger.info("Iteration starts at 0")
+
     for i in grid:
-        model = create_model_supervised(estimator, verbose=False, system=False, probability_threshold=i)
-        try:
-            models_by_threshold.append(model[0])
-        except:
-            models_by_threshold.append(model)
-        model_results = pull().loc[['Mean']]
-        model_results['probability_threshold'] = i
-        results_df.append(model_results)
 
-    logger.info("optimization loop finished successfully")
+        pred_prob = (predicted >= i).astype(int)
+        cost.append(calculate_loss(actual, pred_prob))
 
-    results_concat = pd.concat(results_df, axis=0)
-    results_concat_melted = results_concat.melt(id_vars = ['probability_threshold'], value_vars=list(results_concat.columns[:-1]))
-    optimized_metric_index = np.array(results_concat_melted[results_concat_melted['variable'] == optimize]['value']).argmax()
-    best_model_by_metric = models_by_threshold[optimized_metric_index]
+    optimize_results = pd.DataFrame(
+        {"Probability Threshold": grid, "Cost Function": cost}
+    )
+    fig = px.line(
+        optimize_results,
+        x="Probability Threshold",
+        y="Cost Function",
+        line_shape="linear",
+    )
+    fig.update_layout(plot_bgcolor="rgb(245,245,245)")
+    title = f"{model_name} Probability Threshold Optimization"
 
-    logger.info("plotting optimization threshold using plotly")
+    # calculate vertical line
+    y0 = optimize_results["Cost Function"].min()
+    y1 = optimize_results["Cost Function"].max()
+    x0 = optimize_results.sort_values(by="Cost Function", ascending=False).iloc[0][0]
+    x1 = x0
 
-    # plotting threshold
-    import plotly.express as px
-    title = f"{model_name} Probability Threshold Optimization (default = 0.5)"
-    plot_kwargs = plot_kwargs or {}
-    fig = px.line(results_concat_melted, x="probability_threshold", y="value", title = title,\
-                    color='variable', **plot_kwargs)
-    logger.info("Figure ready for render")
-    fig.show()
+    t = x0
+    if html_param:
 
-    logger.info("returning model with best metric")
-    if return_data:
-        logger.info("also returning data as return_data = True")
-        logger.info("optimize_threshold() succesfully completed......................................")
-        return (results_concat_melted, best_model_by_metric)
-    else:
-        logger.info("optimize_threshold() succesfully completed......................................")
-        return best_model_by_metric
+        fig.add_shape(
+            dict(
+                type="line", x0=x0, y0=y0, x1=x1, y1=y1, line=dict(color="red", width=2)
+            )
+        )
+        fig.update_layout(
+            title={
+                "text": title,
+                "y": 0.95,
+                "x": 0.45,
+                "xanchor": "center",
+                "yanchor": "top",
+            }
+        )
+        logger.info("Figure ready for render")
+        fig.show()
+    print(f"Optimized Probability Threshold: {t} | Optimized Cost Function: {y1}")
+    logger.info(
+        "optimize_threshold() succesfully completed......................................"
+    )
+
+    return float(t)
 
 
 def assign_model(
@@ -8613,7 +8656,6 @@ def predict_model(
     data: Optional[pd.DataFrame] = None,
     probability_threshold: Optional[float] = None,
     encoded_labels: bool = False,  # added in pycaret==2.1.0
-    drift_report: bool = False,
     raw_score: bool = False,
     round: int = 4,  # added in pycaret==2.2.0
     verbose: bool = True,
@@ -8778,26 +8820,6 @@ def predict_model(
                 raise ValueError("Pipeline not found")
 
         X_test_ = data.copy()
-
-    # generate drift report
-    if drift_report:
-        if ml_usecase == MLUsecase.CLASSIFICATION:
-            create_classification_drift_report(
-                _get_model_name(estimator),
-                prep_pipe,
-                data_before_preprocess,
-                X_train,
-                X_test_,
-            )
-
-        elif ml_usecase == MLUsecase.REGRESSION:
-            create_regression_drift_report(
-                _get_model_name(estimator),
-                prep_pipe,
-                data_before_preprocess,
-                X_train,
-                X_test_,
-            )
 
     # function to replace encoded labels with their original values
     # will not run if categorical_labels is false
@@ -10231,454 +10253,6 @@ def get_leaderboard(
     display.clear_output()
     return results
 
-
-def dashboard(
-    estimator, display_format="dash", dashboard_kwargs={}, run_kwargs={}, **kwargs
-):
-    """
-    function to launch ExplainerDashboard.
-    """
-
-    try:
-        import explainerdashboard
-    except ImportError:
-        raise ImportError(
-            "It appears that explainerdashboard library is not installed. "
-            "Do: pip install explainerdashboard"
-        )
-
-    if _ml_usecase == MLUsecase.CLASSIFICATION:
-        _create_classification_dashboard(
-            model=estimator,
-            mode=display_format,
-            dashboard_kwargs=dashboard_kwargs,
-            run_kwargs=run_kwargs,
-            **kwargs,
-        )
-
-    elif _ml_usecase == MLUsecase.REGRESSION:
-        _create_regression_dashboard(
-            model=estimator,
-            mode=display_format,
-            dashboard_kwargs=dashboard_kwargs,
-            run_kwargs=run_kwargs,
-            **kwargs,
-        )
-
-
-def _create_regression_dashboard(
-    model, mode="dash", dashboard_kwargs={}, run_kwargs={}, **kwargs
-):
-    from explainerdashboard import (
-        ExplainerDashboard,
-        RegressionExplainer,
-        ClassifierExplainer,
-    )
-    # Replaceing chars which dash doesnt accept for column name `.` , `{`, `}`
-    X_test_df=get_config("X_test")
-    X_test_df.columns = [col.replace('.','__').replace('{','__').replace('}','__') for col in X_test_df.columns]
-    explainer = RegressionExplainer(
-        model, X_test_df, get_config("y_test"), **kwargs
-    )
-    ExplainerDashboard(explainer, mode=mode, **dashboard_kwargs).run(**run_kwargs)
-
-
-def _create_classification_dashboard(
-    model, mode="dash", dashboard_kwargs={}, run_kwargs={}, **kwargs
-):
-    from explainerdashboard import ExplainerDashboard, ClassifierExplainer
-
-    try:
-        labels_ = list(get_config("prep_pipe").steps[0][1].le.classes_)
-    except:
-        labels_ = None
-    # Replaceing chars which dash doesnt accept for column name `.` , `{`, `}`
-    X_test_df=get_config("X_test")
-    X_test_df.columns = [col.replace('.','__').replace('{','__').replace('}','__') for col in X_test_df.columns]
-    explainer = ClassifierExplainer(
-        model, X_test_df, get_config("y_test"), labels=labels_, **kwargs
-    )
-    ExplainerDashboard(explainer, mode=mode, **dashboard_kwargs).run(**run_kwargs)
-
-
-def convert_model(estimator, language: str = "python") -> str:
-    """
-    This function transpiles trained machine learning models into native
-    inference script in different programming languages (Python, C, Java,
-    Go, JavaScript, Visual Basic, C#, PowerShell, R, PHP, Dart, Haskell,
-    Ruby, F#). This functionality is very useful if you want to deploy models
-    into environments where you can't install your normal Python stack to
-    support model inference.
-    """
-
-    try:
-        import m2cgen as m2c
-    except ImportError:
-        raise ImportError(
-            "It appears that m2cgen is not installed. Do: pip install m2cgen"
-        )
-
-    if language == "python":
-        return m2c.export_to_python(estimator)
-    elif language == "java":
-        return m2c.export_to_java(estimator)
-    elif language == "c":
-        return m2c.export_to_c(estimator)
-    elif language == "c#":
-        return m2c.export_to_c_sharp(estimator)
-    elif language == "dart":
-        return m2c.export_to_dart(estimator)
-    elif language == "f#":
-        return m2c.export_to_f_sharp(estimator)
-    elif language == "go":
-        return m2c.export_to_go(estimator)
-    elif language == "haskell":
-        return m2c.export_to_haskell(estimator)
-    elif language == "javascript":
-        return m2c.export_to_javascript(estimator)
-    elif language == "php":
-        return m2c.export_to_php(estimator)
-    elif language == "powershell":
-        return m2c.export_to_powershell(estimator)
-    elif language == "r":
-        return m2c.export_to_r(estimator)
-    elif language == "ruby":
-        return m2c.export_to_ruby(estimator)
-    elif language == "vb":
-        return m2c.export_to_visual_basic(estimator)
-    else:
-        raise ValueError(
-            f"Wrong language {language}. Expected one of 'python', 'java', 'c', 'c#', 'dart', "
-            "'f#', 'go', 'haskell', 'javascript', 'php', 'powershell', 'r', 'ruby', 'vb'."
-        )
-
-
-def eda(
-    data: Optional[pd.DataFrame] = None,
-    target: Optional[str] = None,
-    display_format: str = "bokeh",
-    **kwargs,
-):
-
-    """
-    Function to generate EDA using AutoVIZ library.
-    """
-
-    try:
-        from autoviz.AutoViz_Class import AutoViz_Class
-    except ImportError:
-        raise ImportError(
-            "It appears that Autoviz is not installed. Do: pip install autoviz"
-        )
-
-    if data is None:
-        try:
-            data = get_config("data_before_preprocess")
-        except:
-            raise ValueError(
-                "When running EDA function before setup, you must pass the pandas.DataFrame explicitly."
-            )
-
-    if target is None:
-        try:
-            target = get_config("prep_pipe")[0].target
-        except:
-            raise ValueError(
-                "When running EDA function before setup, you must pass the target column name explicitly."
-            )
-
-    from autoviz.AutoViz_Class import AutoViz_Class
-
-    AV = AutoViz_Class()
-    AV.AutoViz(
-        filename="", dfte=data, depVar=target, chart_format=display_format, **kwargs
-    )
-
-
-def check_fairness(estimator, sensitive_features: list, plot_kwargs: dict = {}):
-
-    """
-    There are many approaches to conceptualizing fairness. This function follows
-    the approach known as group fairness, which asks: Which groups of individuals
-    are at risk for experiencing harms. This function provides fairness-related
-    metrics between different groups (also called subpopulation).
-    """
-
-    try:
-        import fairlearn
-    except ImportError:
-        raise ImportError(
-            "It appears that fairlearn is not installed. Do: pip install fairlearn"
-        )
-
-    from fairlearn.metrics import MetricFrame, count, selection_rate
-
-    all_metrics = get_metrics()[["Name", "Score Function"]].set_index("Name")
-    metric_dict = {}
-    metric_dict["Samples"] = count
-    for i in all_metrics.index:
-        metric_dict[i] = all_metrics.loc[i][0]
-
-    if _ml_usecase == MLUsecase.CLASSIFICATION:
-        metric_dict["Selection Rate"] = selection_rate
-
-    y_pred = estimator.predict(get_config("X_test"))
-    y_true = np.array(get_config("y_test"))
-    X_test_before_transform = get_config("data_before_preprocess").loc[
-        get_config("X_test").index
-    ]
-
-    try:
-        multi_metric = MetricFrame(
-            metrics=metric_dict,
-            y_true=y_true,
-            y_pred=y_pred,
-            sensitive_features=X_test_before_transform[sensitive_features],
-        )
-    except Exception:
-        if MLUsecase.CLASSIFICATION:
-            metric_dict.pop("AUC")
-            multi_metric = MetricFrame(
-                metrics=metric_dict,
-                y_true=y_true,
-                y_pred=y_pred,
-                sensitive_features=X_test_before_transform[sensitive_features],
-            )
-
-    multi_metric.by_group.plot.bar(
-        subplots=True,
-        layout=[3, 3],
-        legend=False,
-        figsize=[16, 8],
-        title="Performance Metrics by Sensitive Features",
-        **plot_kwargs,
-    )
-
-    return pd.DataFrame(multi_metric.by_group)
-
-
-def create_api(estimator, api_name, host="127.0.0.1", port=8000):
-
-    """
-    This function creates API and write it as a python file using FastAPI
-    """
-
-    try:
-        import fastapi
-    except ImportError:
-        raise ImportError(
-            "It appears that FastAPI is not installed. Do: pip install fastapi"
-        )
-
-    try:
-        import uvicorn
-    except ImportError:
-        raise ImportError(
-            "It appears that uvicorn is not installed. Do: pip install uvicorn"
-        )
-
-    target_name = get_config("prep_pipe")[0].target
-    raw_data = get_config("data_before_preprocess").copy()
-    raw_data.drop(target_name, axis=1, inplace=True)
-    input_cols = list(raw_data.columns)
-
-    MODULE = get_config("prep_pipe")[0].ml_usecase
-    INPUT_COLS = input_cols
-    INPUT_COLS_FORMATTED = ", ".join(tuple(INPUT_COLS)).replace("'", "")
-    INPUT_COLS_WITHOUT_SPACES = [i.replace(" ", "_") for i in input_cols]
-    INPUT_COLS_WITHOUT_SPACES = [i.replace("-", "_") for i in INPUT_COLS_WITHOUT_SPACES]
-    INPUT_COLS_WITHOUT_SPACES_FORMATTED = ", ".join(
-        tuple(INPUT_COLS_WITHOUT_SPACES)
-    ).replace("'", "")
-    API_NAME = api_name
-    HOST = host
-
-    save_model(estimator, model_name=api_name, verbose=False)
-
-    query = """
-import pandas as pd
-from pycaret.{MODULE_NAME} import load_model, predict_model
-from fastapi import FastAPI
-import uvicorn
-
-# Create the app
-app = FastAPI()
-
-# Load trained Pipeline
-model = load_model('{API_NAME}')
-
-# Define predict function
-@app.post('/predict')
-def predict({INPUT_COLS}):
-    data = pd.DataFrame([[{DATAFRAME}]])
-    data.columns = {COLUMNS}
-    predictions = predict_model(model, data=data) 
-    return {D1}'prediction': list(predictions['Label']){D2}
-
-if __name__ == '__main__':
-    uvicorn.run(app, host='{HOST}', port={PORT})""".format(
-        MODULE_NAME=MODULE,
-        API_NAME=API_NAME,
-        INPUT_COLS=INPUT_COLS_WITHOUT_SPACES_FORMATTED,
-        DATAFRAME=INPUT_COLS_WITHOUT_SPACES_FORMATTED,
-        COLUMNS=INPUT_COLS,
-        D1="{",
-        D2="}",
-        HOST=HOST,
-        PORT=port,
-    )
-
-    file_name = str(api_name) + ".py"
-
-    f = open(file_name, "w")
-    f.write(query)
-    f.close()
-
-    message = """
-API sucessfully created. This function only creates a POST API, it doesn't run it automatically.
-
-To run your API, please run this command --> !python {API_NAME}.py
-    """.format(
-        API_NAME=API_NAME
-    )
-
-    print(message)
-
-
-def create_docker(
-    api_name: str, base_image: str = "python:3.8-slim", expose_port: int = 8000
-):
-
-    """
-    This function creates a ``Dockerfile`` and ``requirements.txt`` for
-    productionalizing API end-point.
-
-
-    Example
-    -------
-    >>> from pycaret.datasets import get_data
-    >>> juice = get_data('juice')
-    >>> from pycaret.classification import *
-    >>> exp_name = setup(data = juice,  target = 'Purchase')
-    >>> lr = create_model('lr')
-    >>> create_api(lr, 'lr_api')
-    >>> create_docker('lr_api')
-
-
-    api_name: str
-        Name of API. Must be saved as a .py file in the same folder.
-
-
-    base_image: str, default = "python:3.8-slim"
-        Name of the base image for Dockerfile.
-
-
-    expose_port: int, default = 8000
-        port for expose for API in the Dockerfile.
-
-
-    Returns:
-        None
-    """
-
-    requirements = """
-pycaret
-fastapi
-uvicorn
-"""
-    print("Writing requirements.txt")
-    f = open("requirements.txt", "w")
-    f.write(requirements)
-    f.close
-
-    print("Writing Dockerfile")
-    docker = """
-    
-FROM {BASE_IMAGE}
-
-WORKDIR /app
-
-ADD . /app
-
-RUN apt-get update && apt-get install -y libgomp1
-
-RUN pip install -r requirements.txt
-
-EXPOSE {PORT}
-
-CMD ["python", "{API_NAME}.py"]    
-""".format(
-        BASE_IMAGE=base_image, PORT=expose_port, API_NAME=api_name
-    )
-
-    with open("Dockerfile", "w") as f:
-        f.write(docker)
-
-    print(
-        """Dockerfile and requirements.txt successfully created.
-To build image you have to run --> !docker image build -f "Dockerfile" -t IMAGE_NAME:IMAGE_TAG .
-        """
-    )
-
-def create_app(estimator, app_kwargs: Optional[dict]):
-    """
-    This function creates a basic gradio app for inference.
-    It will later be expanded for other app types such as 
-    Streamlit.
-
-
-    Example
-    -------
-    >>> from pycaret.datasets import get_data
-    >>> juice = get_data('juice')
-    >>> from pycaret.classification import *
-    >>> exp_name = setup(data = juice,  target = 'Purchase')
-    >>> lr = create_model('lr')
-    >>> create_app(lr)
-
-
-    estimator: scikit-learn compatible object
-        Trained model object
-
-
-    app_kwargs: dict, default = {}
-        arguments to be passed to app class.
-
-
-    Returns:
-        None
-    """
-
-    try:
-        import gradio as gr
-    except ImportError:
-        raise ImportError(
-            "It appears that gradio is not installed. Do: pip install gradio"
-        )
-
-    all_inputs = []
-    app_kwargs = app_kwargs or {}
-
-    data_without_target = get_config('data_before_preprocess').copy()
-    cols_to_drop = [get_config('prep_pipe')[0].target] + get_config('prep_pipe')[0].features_todrop + get_config('prep_pipe')[0].id_columns
-    data_without_target.drop(cols_to_drop, axis=1, errors="ignore", inplace=True)
-    
-    for i in data_without_target.columns:
-        if data_without_target[i].dtype == 'object':
-            all_inputs.append(gr.inputs.Dropdown(list(data_without_target[i].unique()), label=i)) 
-        else:
-            all_inputs.append(gr.inputs.Textbox(label=i))
-            
-    def predict(*dict_input):
-    
-        input_df = pd.DataFrame.from_dict([dict_input])
-        input_df.columns = list(data_without_target.columns)
-        if _ml_usecase == MLUsecase.CLASSIFICATION:
-            return predict_model(estimator, data=input_df, raw_score=True).iloc[0].to_dict()
-        if _ml_usecase == MLUsecase.REGRESSION:
-            return predict_model(estimator, data=input_df).iloc[0].to_dict()
-
-    return gr.Interface(fn = predict, inputs = all_inputs, outputs = "text", live=False, **app_kwargs).launch()
 
 def _choose_better(
     models_and_results: list,

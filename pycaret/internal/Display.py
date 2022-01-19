@@ -170,7 +170,8 @@ class Display:
 
         if monitor_rows and self.html_param:
             self.monitor = pd.DataFrame(
-                monitor_rows, columns=[" " * i for i in range(len(monitor_rows[0]))],
+                monitor_rows,
+                columns=[" " * i for i in range(len(monitor_rows[0]))],
             ).set_index("")
 
 

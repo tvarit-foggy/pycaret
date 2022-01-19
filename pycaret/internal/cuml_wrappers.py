@@ -21,7 +21,6 @@ try:
         def fit_predict(self, X, y=None, out_dtype="int32"):
             return super().fit_predict(X, out_dtype=out_dtype)
 
-
 except ImportError:
     DBSCAN = None
 
@@ -39,7 +38,6 @@ try:
 
         def fit_predict(self, X, y=None, sample_weight=None):
             return super().fit_predict(X, sample_weight=sample_weight)
-
 
 except ImportError:
     KMeans = None
@@ -138,7 +136,6 @@ try:
             )
 
             return self
-
 
 except ImportError:
     SVC = None
@@ -289,7 +286,7 @@ try:
 
     class _RidgeClassifierBase(LinearClassifierMixin, Ridge):
         """Classifier using Ridge regression.
-        
+
         Does not support multiclass problems. Use RidgeClassifier instead.
 
         Ridge extends LinearRegression by providing L2 regularization on the
@@ -519,7 +516,6 @@ try:
         @property
         def classes_(self):
             return self._label_binarizer.classes_
-
 
 except ImportError:
     RidgeClassifier = None

@@ -123,4 +123,3 @@ def show_yellowbrick_plot(
             visualizer.show(clear_figure=True)
 
     logger.info("Visual Rendered Successfully")
-

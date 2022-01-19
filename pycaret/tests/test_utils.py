@@ -31,7 +31,12 @@ def test():
         data, train_size=0.8, random_state=1
     )
     clf1 = pycaret.classification.setup(
-        train, target=target, silent=True, html=False, session_id=123, n_jobs=1,
+        train,
+        target=target,
+        silent=True,
+        html=False,
+        session_id=123,
+        n_jobs=1,
     )
     model = pycaret.classification.create_model("lightgbm")
     data_unseen = test.drop(columns=target)
@@ -85,7 +90,12 @@ def test():
         data, train_size=0.8, random_state=1
     )
     reg1 = pycaret.regression.setup(
-        data, target="medv", silent=True, html=False, session_id=123, n_jobs=1,
+        data,
+        target="medv",
+        silent=True,
+        html=False,
+        session_id=123,
+        n_jobs=1,
     )
     model = pycaret.regression.create_model("lightgbm")
     data_unseen = test.drop(columns=target)

@@ -41,7 +41,11 @@ class BaseContainer:
     """
 
     def __init__(
-        self, id: str, name: str, class_def: type, args: Dict[str, Any] = None,
+        self,
+        id: str,
+        name: str,
+        class_def: type,
+        args: Dict[str, Any] = None,
     ) -> None:
         if not args:
             args = {}

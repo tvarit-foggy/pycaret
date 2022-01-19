@@ -157,18 +157,17 @@ class IntUniformDistribution(Distribution):
 
         class LogUniformInteger(Integer):
             class _LogUniform(LogUniform):
-                def sample(self,
-                        domain: "Integer",
-                        spec = None,
-                        size: int = 1):
-                    assert domain.lower > 0, \
-                        "LogUniform needs a lower bound greater than 0"
-                    assert 0 < domain.upper < float("inf"), \
-                        "LogUniform needs a upper bound greater than 0"
+                def sample(self, domain: "Integer", spec=None, size: int = 1):
+                    assert (
+                        domain.lower > 0
+                    ), "LogUniform needs a lower bound greater than 0"
+                    assert (
+                        0 < domain.upper < float("inf")
+                    ), "LogUniform needs a upper bound greater than 0"
                     logmin = np.log(domain.lower) / np.log(self.base)
                     logmax = np.log(domain.upper) / np.log(self.base)
 
-                    items = self.base**(np.random.uniform(logmin, logmax, size=size))
+                    items = self.base ** (np.random.uniform(logmin, logmax, size=size))
                     items = np.round(items).astype(int)
                     return items if len(items) > 1 else domain.cast(items[0])
 
@@ -178,13 +177,15 @@ class IntUniformDistribution(Distribution):
                         "LogUniform requires a lower bound greater than 0."
                         f"Got: {self.lower}. Did you pass a variable that has "
                         "been log-transformed? If so, pass the non-transformed value "
-                        "instead.")
+                        "instead."
+                    )
                 if not 0 < self.upper < float("inf"):
                     raise ValueError(
                         "LogUniform requires a upper bound greater than 0. "
                         f"Got: {self.lower}. Did you pass a variable that has "
                         "been log-transformed? If so, pass the non-transformed value "
-                        "instead.")
+                        "instead."
+                    )
                 new = copy(self)
                 new.set_sampler(self._LogUniform(base))
                 return new

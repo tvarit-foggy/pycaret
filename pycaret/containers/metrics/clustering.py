@@ -164,7 +164,9 @@ class ClusterMetricContainer(MetricContainer):
 class SilhouetteMetricContainer(ClusterMetricContainer):
     def __init__(self, globals_dict: dict) -> None:
         super().__init__(
-            id="silhouette", name="Silhouette", score_func=metrics.silhouette_score,
+            id="silhouette",
+            name="Silhouette",
+            score_func=metrics.silhouette_score,
         )
 
 
@@ -180,7 +182,9 @@ class CHSMetricContainer(ClusterMetricContainer):
 class DBMetricContainer(ClusterMetricContainer):
     def __init__(self, globals_dict: dict) -> None:
         super().__init__(
-            id="db", name="Davies-Bouldin", score_func=metrics.davies_bouldin_score,
+            id="db",
+            name="Davies-Bouldin",
+            score_func=metrics.davies_bouldin_score,
         )
 
 

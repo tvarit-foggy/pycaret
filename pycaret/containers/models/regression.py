@@ -25,6 +25,7 @@ import pycaret.containers.base_container
 import numpy as np
 from packaging import version
 
+
 class RegressorContainer(ModelContainer):
     """
     Base regression model container class, for easier definition of containers. Ensures consistent format
@@ -1128,15 +1129,14 @@ class RandomForestRegressorContainer(RegressorContainer):
             }
         else:
             import cuml
+
             if version.parse(cuml.__version__) >= version.parse("0.19"):
                 args = {
-                "random_state": globals_dict["seed"],
+                    "random_state": globals_dict["seed"],
                 }
             else:
-                args = {
-                    "seed": globals_dict["seed"]
-                }
-                
+                args = {"seed": globals_dict["seed"]}
+
         tune_args = {}
         tune_grid = {
             "n_estimators": np_list_arange(10, 300, 10, inclusive=True),
@@ -1695,9 +1695,9 @@ class LGBMRegressorContainer(RegressorContainer):
                             f"LightGBM GPU mode not available. Consult https://lightgbm.readthedocs.io/en/latest/GPU-Tutorial.html."
                         )
 
-        if is_gpu_enabled=="gpu":
+        if is_gpu_enabled == "gpu":
             args["device"] = "gpu"
-        elif is_gpu_enabled=="cuda":
+        elif is_gpu_enabled == "cuda":
             args["device"] = "cuda"
 
         super().__init__(
@@ -1796,13 +1796,14 @@ class CatBoostRegressorContainer(RegressorContainer):
             is_gpu_enabled=use_gpu,
         )
 
+
 class DummyRegressorContainer(RegressorContainer):
     def __init__(self, globals_dict: dict) -> None:
         logger = get_logger()
         np.random.seed(globals_dict["seed"])
         from sklearn.dummy import DummyRegressor
 
-        args = {"strategy":"mean"}
+        args = {"strategy": "mean"}
         tune_args = {}
         tune_grid = {}
         tune_distributions = {}
@@ -1819,7 +1820,8 @@ class DummyRegressorContainer(RegressorContainer):
             tune_args=tune_args,
             shap=False,
         )
-        
+
+
 class BaggingRegressorContainer(RegressorContainer):
     def __init__(self, globals_dict: dict) -> None:
         logger = get_logger()

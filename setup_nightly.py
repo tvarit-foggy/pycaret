@@ -4,7 +4,7 @@
 from setuptools import setup, find_packages
 import time
 
-nightly_version = "2.3.6"
+nightly_version = "2.3.5"
 
 nightly_readme = f"This is a nightly version of the [PyCaret](https://pypi.org/project/pycaret/) library, intended as a preview of the upcoming {nightly_version} version. It may contain unstable and untested code.\n"
 
@@ -43,6 +43,8 @@ setup(
     packages=find_packages(include=["pycaret*"]),
     include_package_data=True,
     install_requires=required,
-    extras_require={"full": optional_required,
-                    "test": test_required + optional_required},
+    extras_require={
+        "full": optional_required,
+        "test": test_required + optional_required,
+    },
 )
